@@ -18,6 +18,7 @@ const c = {
 };
 
 const BASE_URL = "https://task.simplechain.com";
+const INVITE_CODE = "9v5l6ft3929";
 
 const TASKS = [
     { id: "TK-202604-DT-0006", name: "Daily Check-in" },
@@ -27,9 +28,27 @@ const TASKS = [
 
 const USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (X11; Linux i686; rv:109.0) Gecko/20100101 Firefox/119.0",
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 12; SM-S908B) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
 ];
 
 function banner() {
@@ -159,14 +178,15 @@ class Bot {
     }
 
     createSession() {
+        const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
         this.session = axios.create({
             baseURL: BASE_URL,
             timeout: 30000,
             headers: {
                 'Content-Type': 'application/json',
-                'User-Agent': USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
+                'User-Agent': userAgent,
                 'Origin': BASE_URL,
-                'Referer': BASE_URL + '/'
+                'Referer': `${BASE_URL}/?inviteCode=${INVITE_CODE}`
             }
         });
         const agent = this.proxyManager.getAgent();
@@ -180,6 +200,7 @@ class Bot {
         const signature = await this.account.wallet.signMessage(message);
         const login = await this.session.post('/api/v1/login', {
             address: this.account.address,
+            inviteCode: INVITE_CODE,
             message: message,
             signature: signature
         });
@@ -291,7 +312,7 @@ async function main() {
     const useProxy = (proxyChoice === '1');
     const proxyManager = new ProxyManager(useProxy);
     
-    console.log(c.g('\n[INFO] Starting 24/7 auto loop mode...'));
+    console.log(c.g('\n[INFO] Starting 24/7 auto loop mode with jitter...'));
     console.log(c.gr('  Tasks: Daily Check-in | Visit Website | Block Explorer\n'));
     
     let cycle = 1;
