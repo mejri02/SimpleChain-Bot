@@ -20,12 +20,6 @@ const c = {
 const BASE_URL = "https://task.simplechain.com";
 const INVITE_CODE = "9v5l6ft3929";
 
-const TASKS = [
-    { id: "TK-202604-DT-0006", name: "Daily Check-in" },
-    { id: "TK-202604-DT-0007", name: "Visit Website" },
-    { id: "TK-202604-CT-0006", name: "Block Explorer" }
-];
-
 const USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
@@ -51,6 +45,32 @@ const USER_AGENTS = [
     "Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
 ];
 
+const RPC_URL = "https://prod-simple-abroad.qukuaicunzheng.top/rpc/";
+const CHAIN_ID = 1913;
+const WSRW = "0xec1bF294Ea5b3271A87606B51F5465352bc19bE5";
+const MERCURY = "0x8c0c42fD298623d035eeFd8b2783c94069610d2B";
+const MARS = "0xFC12Ae35889A4a6D0b1cE94a6675Ef869F6eb207";
+const SWAP_ROUTER = "0x43b06d73dC0dDB9214B28349a913A2b7FAAFCEe8";
+const LIQUIDITY_ROUTER = "0x6E172Ba709487fd0Dc47D8A23e128C0328E0646c";
+const FEE_TIER = 3000;
+const SWAP_MIN = ethers.parseEther("0.0001");
+const SWAP_MAX = ethers.parseEther("0.005");
+const SWAP_COUNT = 5;
+
+const ERC20_ABI = [
+    "function approve(address spender, uint256 amount) external returns (bool)",
+    "function allowance(address owner, address spender) external view returns (uint256)",
+    "function balanceOf(address owner) external view returns (uint256)",
+];
+
+const SWAP_ROUTER_ABI = [
+    "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) external payable returns (uint256 amountOut)",
+];
+
+const LIQUIDITY_ABI = [
+    "function mint((address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline) params) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+];
+
 function banner() {
     console.log(c.cy(`
 ╔════════════════════════════════════════════════════════════════════╗
@@ -62,8 +82,8 @@ function banner() {
 ║${c.g('     ███████║██║██║ ╚═╝ ██║██║     ███████╗███████╗╚██████╗██║  ██╗')}║
 ║${c.g('     ╚══════╝╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚══════╝ ╚═════╝╚═╝  ╚═╝')}║
 ║${c.m('                                                              ')}║
-║${c.cy('                   SIMPLECHAIN TASK BOT                       ')}║
-║${c.w('                Daily Checkin | Website | Explorer             ')}║
+║${c.cy('                   SIMPLECHAIN BOT                            ')}║
+║${c.w('         Web Tasks + On-Chain (Swap & Liquidity)              ')}║
 ║${c.w('                  24/7 Loop | Proxy Support                    ')}║
 ╚════════════════════════════════════════════════════════════════════╝
 `));
@@ -102,6 +122,12 @@ function formatTime(seconds) {
     const s = seconds % 60;
     return `${h}h ${m}m ${s}s`;
 }
+
+function randomBetween(min, max) {
+    return min + BigInt(Math.floor(Math.random() * Number(max - min)));
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 class ProxyManager {
     constructor(useProxy = false) {
@@ -213,29 +239,160 @@ class Bot {
     }
 
     async dailyCheckin() {
-        const status = await this.session.get('/api/v1/campaign/checkin/status');
-        if (status.data?.data?.todayChecked === true) {
-            return { success: true, message: "Already checked in" };
+        try {
+            const status = await this.session.get('/api/v1/campaign/checkin/status');
+            if (status.data?.data?.todayChecked === true) {
+                return { success: true, message: "Already checked in" };
+            }
+            const checkin = await this.session.post('/api/v1/campaign/checkin', {});
+            if (checkin.data?.code === 200 || checkin.data?.code === 0) {
+                const points = checkin.data?.data?.totalReward || 0;
+                const streak = checkin.data?.data?.currentStreak || 0;
+                return { success: true, message: `+${points} pts (streak: ${streak})` };
+            }
+            return { success: false, message: checkin.data?.message || "Failed" };
+        } catch (e) {
+            return { success: false, message: e.message };
         }
-        const checkin = await this.session.post('/api/v1/campaign/checkin', {});
-        if (checkin.data?.code === 200 || checkin.data?.code === 0) {
-            const points = checkin.data?.data?.totalReward || 0;
-            const streak = checkin.data?.data?.currentStreak || 0;
-            return { success: true, message: `+${points} pts (streak: ${streak})` };
-        }
-        return { success: false, message: checkin.data?.message || "Failed" };
     }
 
     async completeTask(taskId) {
-        const resp = await this.session.post('/api/v1/task/complete', { taskId: taskId });
-        if (resp.data?.code === 200 || resp.data?.code === 0) {
-            const points = resp.data?.data?.rewardPoints || 0;
-            return { success: true, message: `+${points} pts` };
+        try {
+            const resp = await this.session.post('/api/v1/task/complete', { taskId: taskId });
+            if (resp.data?.code === 200 || resp.data?.code === 0) {
+                const points = resp.data?.data?.rewardPoints || 0;
+                return { success: true, message: `+${points} pts` };
+            }
+            if (resp.data?.message?.toLowerCase().includes('already')) {
+                return { success: true, message: "Already completed" };
+            }
+            return { success: false, message: resp.data?.message || "Failed" };
+        } catch (e) {
+            return { success: false, message: e.message };
         }
-        if (resp.data?.message?.toLowerCase().includes('already')) {
-            return { success: true, message: "Already completed" };
+    }
+
+    async getTaskList() {
+        try {
+            const resp = await this.session.get('/api/v1/task/list');
+            if (resp.data?.code === 200 || resp.data?.code === 0) {
+                return resp.data?.data?.tasks || [];
+            }
+            return [];
+        } catch (e) {
+            return [];
         }
-        return { success: false, message: resp.data?.message || "Failed" };
+    }
+
+    async doSwap(tokenOut, amountIn) {
+        try {
+            const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
+            const signer = new ethers.Wallet(this.account.privateKey, provider);
+            const router = new ethers.Contract(SWAP_ROUTER, SWAP_ROUTER_ABI, signer);
+            
+            const tx = await router.exactInputSingle(
+                {
+                    tokenIn: WSRW,
+                    tokenOut: tokenOut,
+                    fee: FEE_TIER,
+                    recipient: signer.address,
+                    amountIn: amountIn,
+                    amountOutMinimum: 0n,
+                    sqrtPriceLimitX96: 0n,
+                },
+                { value: amountIn, gasLimit: 500000 }
+            );
+            const receipt = await tx.wait();
+            console.log(c.g(`  ✓ Swap tx: ${receipt.hash}`));
+            return receipt;
+        } catch (error) {
+            console.log(c.r(`  ✗ Swap failed: ${error.message}`));
+            return null;
+        }
+    }
+
+    async ensureApproval(signer, tokenAddress, spender, amount) {
+        try {
+            const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+            const allowance = await token.allowance(signer.address, spender);
+            if (allowance < amount) {
+                console.log(c.gr(`  → Approving ${ethers.formatEther(amount)} tokens...`));
+                const tx = await token.approve(spender, ethers.MaxUint256);
+                await tx.wait();
+                console.log(c.g(`  ✓ Approved`));
+            }
+        } catch (error) {
+            console.log(c.r(`  ✗ Approval failed: ${error.message}`));
+            throw error;
+        }
+    }
+
+    async doAddLiquidity(tokenAddress, tokenName) {
+        try {
+            const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
+            const signer = new ethers.Wallet(this.account.privateKey, provider);
+            const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+            const bal = await tokenContract.balanceOf(signer.address);
+            const MIN_AMOUNT = ethers.parseEther("0.0001");
+
+            if (bal === 0n || bal < MIN_AMOUNT) {
+                console.log(c.y(`  ⚠️ Balance ${tokenName} empty (${ethers.formatEther(bal)}), skip`));
+                return;
+            }
+
+            const pct = BigInt(Math.floor(Math.random() * 30) + 20);
+            const amountByPct = (bal * pct) / 100n;
+            const amountToken = amountByPct;
+            const amountSRW = amountToken / 10n;
+
+            if (amountToken < MIN_AMOUNT || amountSRW < MIN_AMOUNT) {
+                console.log(c.y(`  ⚠️ Amount too small, skip (${ethers.formatEther(amountToken)} ${tokenName})`));
+                return;
+            }
+
+            await this.ensureApproval(signer, tokenAddress, LIQUIDITY_ROUTER, amountToken);
+
+            let t0, t1, a0, a1, nativeValue;
+            if (WSRW.toLowerCase() < tokenAddress.toLowerCase()) {
+                t0 = WSRW;
+                t1 = tokenAddress;
+                a0 = amountSRW;
+                a1 = amountToken;
+                nativeValue = amountSRW;
+            } else {
+                t0 = tokenAddress;
+                t1 = WSRW;
+                a0 = amountToken;
+                a1 = amountSRW;
+                nativeValue = amountSRW;
+            }
+
+            const posManager = new ethers.Contract(LIQUIDITY_ROUTER, LIQUIDITY_ABI, signer);
+            const deadline = Math.floor(Date.now() / 1000) + 600;
+
+            console.log(c.gr(`  → Adding ${ethers.formatEther(amountToken)} ${tokenName} + ${ethers.formatEther(amountSRW)} SRW`));
+
+            const tx = await posManager.mint(
+                {
+                    token0: t0,
+                    token1: t1,
+                    fee: FEE_TIER,
+                    tickLower: -887160,
+                    tickUpper: 887160,
+                    amount0Desired: a0,
+                    amount1Desired: a1,
+                    amount0Min: 0n,
+                    amount1Min: 0n,
+                    recipient: signer.address,
+                    deadline,
+                },
+                { value: nativeValue, gasLimit: 3000000 }
+            );
+            const receipt = await tx.wait();
+            console.log(c.g(`  ✓ Add liquidity SRW+${tokenName} (${pct}%) tx: ${receipt.hash}`));
+        } catch (error) {
+            console.log(c.r(`  ✗ Add liquidity failed: ${error.message}`));
+        }
     }
 
     async run() {
@@ -248,18 +405,64 @@ class Bot {
         }
         console.log(c.g(`  ✓ Logged in`));
         
-        for (const task of TASKS) {
-            await jitter(2, 4);
-            let result;
-            if (task.id === "TK-202604-DT-0006") {
-                result = await this.dailyCheckin();
-            } else {
-                result = await this.completeTask(task.id);
-            }
-            const icon = result.success ? c.g(`✓`) : c.r(`✗`);
-            console.log(`  ${icon} ${task.name}: ${result.message}`);
-            this.results[task.name] = result.success;
+        const tasks = await this.getTaskList();
+        console.log(c.gr(`  ✓ ${tasks.length} tasks loaded`));
+
+        const webTasks = tasks.filter(t => t.status === "ACTIVE");
+        const taskMap = {};
+        for (const t of webTasks) {
+            taskMap[t.taskCode] = t.taskId;
         }
+
+        const taskList = [
+            { code: "ACCESS_LINK", name: "Visit Website" },
+            { code: "SWAP_TOKEN", name: "Swap Token" },
+            { code: "PROVIDE_LIQUIDITY", name: "Provide Liquidity" }
+        ];
+
+        for (const task of taskList) {
+            await jitter(2, 4);
+            if (taskMap[task.code]) {
+                const result = await this.completeTask(taskMap[task.code]);
+                const icon = result.success ? c.g(`✓`) : c.r(`✗`);
+                console.log(`  ${icon} ${task.name}: ${result.message}`);
+                this.results[task.name] = result.success;
+            } else {
+                console.log(c.y(`  ⚠️ ${task.name}: Task not found`));
+                this.results[task.name] = false;
+            }
+        }
+
+        await jitter(2, 4);
+        const checkinResult = await this.dailyCheckin();
+        const icon = checkinResult.success ? c.g(`✓`) : c.r(`✗`);
+        console.log(`  ${icon} Daily Check-in: ${checkinResult.message}`);
+        this.results["Daily Check-in"] = checkinResult.success;
+
+        console.log(c.cy(`\n  🔄 Performing on-chain swaps...`));
+        const tokens = [
+            { address: MERCURY, name: "MERCURY" },
+            { address: MARS, name: "MARS" }
+        ];
+        
+        for (const token of tokens) {
+            console.log(c.gr(`  → SRW → ${token.name}`));
+            for (let s = 1; s <= SWAP_COUNT; s++) {
+                const amount = randomBetween(SWAP_MIN, SWAP_MAX);
+                console.log(c.gr(`    [${s}/${SWAP_COUNT}] ${ethers.formatEther(amount)} SRW`));
+                await this.doSwap(token.address, amount);
+                if (s < SWAP_COUNT) await sleep(3000);
+            }
+        }
+
+        console.log(c.cy(`\n  💧 Adding liquidity...`));
+        for (const token of tokens) {
+            await this.doAddLiquidity(token.address, token.name);
+            await sleep(3000);
+        }
+
+        this.results["Swaps"] = true;
+        this.results["Liquidity"] = true;
     }
 }
 
@@ -272,7 +475,8 @@ async function runCycle(cycleNum, proxyManager) {
     console.log(c.m(`════════════════════════════════════════════════════════════`));
     
     const taskStats = {};
-    for (const task of TASKS) taskStats[task.name] = 0;
+    const taskNames = ["Visit Website", "Swap Token", "Provide Liquidity", "Daily Check-in", "Swaps", "Liquidity"];
+    for (const name of taskNames) taskStats[name] = 0;
     const start = Date.now();
     
     for (let i = 0; i < accountManager.accounts.length; i++) {
@@ -280,8 +484,8 @@ async function runCycle(cycleNum, proxyManager) {
         const bot = new Bot(acc, proxyManager);
         await bot.run();
         
-        for (const task of TASKS) {
-            if (bot.results[task.name]) taskStats[task.name]++;
+        for (const name of taskNames) {
+            if (bot.results[name]) taskStats[name]++;
         }
         
         if (i < accountManager.accounts.length - 1) {
@@ -291,8 +495,8 @@ async function runCycle(cycleNum, proxyManager) {
     
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
     console.log(c.cy(`\n📊 Cycle ${cycleNum} completed in ${elapsed}s`));
-    for (const task of TASKS) {
-        console.log(c.g(`  ✓ ${task.name}: ${taskStats[task.name]}/${accountManager.accounts.length}`));
+    for (const name of taskNames) {
+        console.log(c.g(`  ✓ ${name}: ${taskStats[name]}/${accountManager.accounts.length}`));
     }
     
     return true;
@@ -313,7 +517,7 @@ async function main() {
     const proxyManager = new ProxyManager(useProxy);
     
     console.log(c.g('\n[INFO] Starting 24/7 auto loop mode with jitter...'));
-    console.log(c.gr('  Tasks: Daily Check-in | Visit Website | Block Explorer\n'));
+    console.log(c.gr('  Tasks: Daily Check-in | Visit Website | Swap | Liquidity\n'));
     
     let cycle = 1;
     const BASE_WAIT = 24 * 60 * 60;
