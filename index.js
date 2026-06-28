@@ -201,6 +201,7 @@ class Bot {
         this.token = null;
         this.session = null;
         this.results = {};
+        this.completedTasks = [];
     }
 
     createSession() {
@@ -390,8 +391,10 @@ class Bot {
             );
             const receipt = await tx.wait();
             console.log(c.g(`  ✓ Add liquidity SRW+${tokenName} (${pct}%) tx: ${receipt.hash}`));
+            return true;
         } catch (error) {
             console.log(c.r(`  ✗ Add liquidity failed: ${error.message}`));
+            return false;
         }
     }
 
@@ -410,59 +413,87 @@ class Bot {
 
         const webTasks = tasks.filter(t => t.status === "ACTIVE");
         const taskMap = {};
+        const taskNameMap = {};
         for (const t of webTasks) {
             taskMap[t.taskCode] = t.taskId;
+            taskNameMap[t.taskId] = t.taskName || t.taskCode;
         }
 
-        const taskList = [
-            { code: "ACCESS_LINK", name: "Visit Website" },
-            { code: "SWAP_TOKEN", name: "Swap Token" },
-            { code: "PROVIDE_LIQUIDITY", name: "Provide Liquidity" }
-        ];
-
-        for (const task of taskList) {
+        // Process all active tasks dynamically
+        for (const task of webTasks) {
             await jitter(2, 4);
-            if (taskMap[task.code]) {
-                const result = await this.completeTask(taskMap[task.code]);
-                const icon = result.success ? c.g(`✓`) : c.r(`✗`);
-                console.log(`  ${icon} ${task.name}: ${result.message}`);
-                this.results[task.name] = result.success;
-            } else {
-                console.log(c.y(`  ⚠️ ${task.name}: Task not found`));
-                this.results[task.name] = false;
+            
+            // Skip if already completed (check status)
+            if (task.status !== "ACTIVE") {
+                console.log(c.y(`  ⚠️ ${task.taskName || task.taskCode}: Already completed or not active`));
+                this.results[task.taskName || task.taskCode] = false;
+                continue;
+            }
+
+            const result = await this.completeTask(task.taskId);
+            const icon = result.success ? c.g(`✓`) : c.r(`✗`);
+            const taskName = task.taskName || task.taskCode;
+            console.log(`  ${icon} ${taskName}: ${result.message}`);
+            this.results[taskName] = result.success;
+            if (result.success) {
+                this.completedTasks.push(task.taskId);
             }
         }
 
+        // Daily Check-in
         await jitter(2, 4);
         const checkinResult = await this.dailyCheckin();
         const icon = checkinResult.success ? c.g(`✓`) : c.r(`✗`);
         console.log(`  ${icon} Daily Check-in: ${checkinResult.message}`);
         this.results["Daily Check-in"] = checkinResult.success;
 
-        console.log(c.cy(`\n  🔄 Performing on-chain swaps...`));
-        const tokens = [
-            { address: MERCURY, name: "MERCURY" },
-            { address: MARS, name: "MARS" }
-        ];
-        
-        for (const token of tokens) {
-            console.log(c.gr(`  → SRW → ${token.name}`));
-            for (let s = 1; s <= SWAP_COUNT; s++) {
-                const amount = randomBetween(SWAP_MIN, SWAP_MAX);
-                console.log(c.gr(`    [${s}/${SWAP_COUNT}] ${ethers.formatEther(amount)} SRW`));
-                await this.doSwap(token.address, amount);
-                if (s < SWAP_COUNT) await sleep(3000);
+        // Check if we need to do on-chain actions (if SWAP_TOKEN or PROVIDE_LIQUIDITY tasks exist)
+        const hasSwapTask = webTasks.some(t => t.taskCode === "SWAP_TOKEN");
+        const hasLiquidityTask = webTasks.some(t => t.taskCode === "PROVIDE_LIQUIDITY" || t.taskId === "TK-202606-CT-0013");
+
+        if (hasSwapTask) {
+            console.log(c.cy(`\n  🔄 Performing on-chain swaps...`));
+            const tokens = [
+                { address: MERCURY, name: "MERCURY" },
+                { address: MARS, name: "MARS" }
+            ];
+            
+            for (const token of tokens) {
+                console.log(c.gr(`  → SRW → ${token.name}`));
+                for (let s = 1; s <= SWAP_COUNT; s++) {
+                    const amount = randomBetween(SWAP_MIN, SWAP_MAX);
+                    console.log(c.gr(`    [${s}/${SWAP_COUNT}] ${ethers.formatEther(amount)} SRW`));
+                    await this.doSwap(token.address, amount);
+                    if (s < SWAP_COUNT) await sleep(3000);
+                }
             }
         }
 
-        console.log(c.cy(`\n  💧 Adding liquidity...`));
-        for (const token of tokens) {
-            await this.doAddLiquidity(token.address, token.name);
-            await sleep(3000);
+        if (hasLiquidityTask) {
+            console.log(c.cy(`\n  💧 Adding liquidity...`));
+            const tokens = [
+                { address: MERCURY, name: "MERCURY" },
+                { address: MARS, name: "MARS" }
+            ];
+            for (const token of tokens) {
+                const success = await this.doAddLiquidity(token.address, token.name);
+                if (success) {
+                    // Try to verify the liquidity task
+                    const liqTask = webTasks.find(t => t.taskId === "TK-202606-CT-0013" || t.taskCode === "PROVIDE_LIQUIDITY");
+                    if (liqTask && liqTask.status === "ACTIVE") {
+                        await jitter(2, 4);
+                        const verifyResult = await this.completeTask(liqTask.taskId);
+                        const verifyIcon = verifyResult.success ? c.g(`✓`) : c.r(`✗`);
+                        console.log(`  ${verifyIcon} Verify Liquidity: ${verifyResult.message}`);
+                        this.results["Verify Liquidity"] = verifyResult.success;
+                    }
+                }
+                await sleep(3000);
+            }
         }
 
-        this.results["Swaps"] = true;
-        this.results["Liquidity"] = true;
+        this.results["Swaps"] = hasSwapTask;
+        this.results["Liquidity"] = hasLiquidityTask;
     }
 }
 
@@ -475,7 +506,7 @@ async function runCycle(cycleNum, proxyManager) {
     console.log(c.m(`════════════════════════════════════════════════════════════`));
     
     const taskStats = {};
-    const taskNames = ["Visit Website", "Swap Token", "Provide Liquidity", "Daily Check-in", "Swaps", "Liquidity"];
+    const taskNames = ["Daily Check-in", "Swaps", "Liquidity", "Verify Liquidity"];
     for (const name of taskNames) taskStats[name] = 0;
     const start = Date.now();
     
@@ -517,7 +548,7 @@ async function main() {
     const proxyManager = new ProxyManager(useProxy);
     
     console.log(c.g('\n[INFO] Starting 24/7 auto loop mode with jitter...'));
-    console.log(c.gr('  Tasks: Daily Check-in | Visit Website | Swap | Liquidity\n'));
+    console.log(c.gr('  Tasks: Dynamic task completion | Daily Check-in | Swap | Liquidity\n'));
     
     let cycle = 1;
     const BASE_WAIT = 24 * 60 * 60;
